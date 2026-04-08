@@ -17,14 +17,14 @@ permissions:
 
 jobs:
   plan:
-    name: Plan — ${{ matrix.tfvars }}
+    name: Plan — dev-${{ matrix.region }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        tfvars:
-          - dev-us-east-1
-          - dev-ap-south-1
+        region:
+          - us-east-1
+          - ap-south-1
 
     steps:
       - name: Checkout
@@ -35,27 +35,20 @@ jobs:
         with:
           terraform_version: "1.7.0"
 
-      - name: Extract region from tfvars filename
-        id: region
-        run: |
-          # e.g. dev-us-east-1 → us-east-1
-          REGION=$(echo "${{ matrix.tfvars }}" | cut -d'-' -f2-)
-          echo "region=${REGION}" >> $GITHUB_OUTPUT
-
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.DEV_ACCOUNT_ID }}:role/terraform-plan-role
-          aws-region: ${{ steps.region.outputs.region }}
+          aws-region: ${{ matrix.region }}
 
       - name: Terraform Init
         id: init
         working-directory: terraform
         run: |
           terraform init \
-            -backend-config="bucket=tf-state-${{ matrix.tfvars }}" \
+            -backend-config="bucket=tf-state-dev-${{ matrix.region }}" \
             -backend-config="key=clevertap/terraform.tfstate" \
-            -backend-config="region=${{ steps.region.outputs.region }}" \
+            -backend-config="region=${{ matrix.region }}" \
             -backend-config="dynamodb_table=tf-locks-dev" \
             -input=false
 
@@ -69,7 +62,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform plan \
-            -var-file="${{ matrix.tfvars }}.tfvars" \
+            -var-file="tfvars/dev/${{ matrix.region }}.tfvars" \
             -no-color \
             -input=false \
             -out=tfplan 2>&1 | tee plan-output.txt
@@ -85,7 +78,7 @@ jobs:
               ? planOutput.substring(0, 60000) + '\n\n... output truncated (too large for comment)'
               : planOutput;
 
-            const body = `### Terraform Plan — \`${{ matrix.tfvars }}\`
+            const body = `### Terraform Plan — \`dev/${{ matrix.region }}\`
 
             #### Init: \`${{ steps.init.outcome }}\`
             #### Validate: \`${{ steps.validate.outcome }}\`

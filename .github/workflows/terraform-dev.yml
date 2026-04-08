@@ -66,7 +66,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform plan \
-            -var-file="dev-${{ github.event.inputs.region }}.tfvars" \
+            -var-file="tfvars/dev/${{ github.event.inputs.region }}.tfvars" \
             -no-color \
             -input=false
 
@@ -74,7 +74,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform apply \
-            -var-file="dev-${{ github.event.inputs.region }}.tfvars" \
+            -var-file="tfvars/dev/${{ github.event.inputs.region }}.tfvars" \
             -auto-approve \
             -input=false
 
@@ -121,6 +121,6 @@ jobs:
         working-directory: terraform
         run: |
           terraform apply \
-            -var-file="dev-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/dev/${{ matrix.region }}.tfvars" \
             -auto-approve \
             -input=false

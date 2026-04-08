@@ -73,7 +73,7 @@ jobs:
         # exit code 2 = changes detected (drift!)
         run: |
           terraform plan \
-            -var-file="${{ matrix.env }}-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/${{ matrix.env }}/${{ matrix.region }}.tfvars" \
             -detailed-exitcode \
             -no-color \
             -input=false \

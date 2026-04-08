@@ -59,7 +59,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform plan \
-            -var-file="prod-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/prod/${{ matrix.region }}.tfvars" \
             -no-color \
             -input=false
 
@@ -67,6 +67,6 @@ jobs:
         working-directory: terraform
         run: |
           terraform apply \
-            -var-file="prod-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/prod/${{ matrix.region }}.tfvars" \
             -auto-approve \
             -input=false

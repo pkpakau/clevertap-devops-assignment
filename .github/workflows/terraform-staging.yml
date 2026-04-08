@@ -57,7 +57,7 @@ jobs:
         working-directory: terraform
         run: |
           terraform plan \
-            -var-file="staging-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/staging/${{ matrix.region }}.tfvars" \
             -no-color \
             -input=false
 
@@ -65,6 +65,6 @@ jobs:
         working-directory: terraform
         run: |
           terraform apply \
-            -var-file="staging-${{ matrix.region }}.tfvars" \
+            -var-file="tfvars/staging/${{ matrix.region }}.tfvars" \
             -auto-approve \
             -input=false
