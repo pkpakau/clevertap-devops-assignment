@@ -1,0 +1,116 @@
+name: Terraform Drift Detection
+
+# Runs every 6 hours against all environments
+# Alerts to Slack if real infra has drifted from terraform state
+# Never auto-remediates — engineers must raise a PR to fix drift
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:          # allow manual trigger for on-demand checks
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  detect-drift:
+    name: Drift — ${{ matrix.env }}-${{ matrix.region }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # check all envs even if one fails
+      matrix:
+        include:
+          - env: dev
+            region: us-east-1
+            account_var: DEV_ACCOUNT_ID
+          - env: dev
+            region: ap-south-1
+            account_var: DEV_ACCOUNT_ID
+          - env: staging
+            region: us-east-1
+            account_var: STAGING_ACCOUNT_ID
+          - env: staging
+            region: ap-south-1
+            account_var: STAGING_ACCOUNT_ID
+          - env: prod
+            region: us-east-1
+            account_var: PROD_ACCOUNT_ID
+          - env: prod
+            region: ap-south-1
+            account_var: PROD_ACCOUNT_ID
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars[matrix.account_var] }}:role/terraform-plan-role
+          aws-region: ${{ matrix.region }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tf-state-${{ matrix.env }}-${{ matrix.region }}" \
+            -backend-config="key=clevertap/terraform.tfstate" \
+            -backend-config="region=${{ matrix.region }}" \
+            -backend-config="dynamodb_table=tf-locks-${{ matrix.env }}" \
+            -input=false
+
+      - name: Terraform Plan (drift check)
+        id: plan
+        working-directory: terraform
+        # exit code 0 = no changes (no drift)
+        # exit code 1 = error
+        # exit code 2 = changes detected (drift!)
+        run: |
+          terraform plan \
+            -var-file="${{ matrix.env }}-${{ matrix.region }}.tfvars" \
+            -detailed-exitcode \
+            -no-color \
+            -input=false \
+            -out=tfplan 2>&1 | tee drift-output.txt
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Alert Slack on drift
+        if: steps.plan.outputs.exitcode == '2'
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": ":warning: *Terraform Drift Detected*",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *Drift detected in `${{ matrix.env }}/${{ matrix.region }}`*\n\nReal infra has diverged from Terraform state. This likely means a manual change was made outside of Terraform.\n\n*Action required:* Review the plan output and raise a PR to reconcile.\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View drift details>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Fail job if drift detected
+        if: steps.plan.outputs.exitcode == '2'
+        run: |
+          echo "DRIFT DETECTED in ${{ matrix.env }}/${{ matrix.region }}"
+          echo "Review the plan output above and raise a PR to fix"
+          exit 1
+
+      - name: Fail job if plan errored
+        if: steps.plan.outputs.exitcode == '1'
+        run: |
+          echo "Terraform plan errored — check credentials and state access"
+          exit 1

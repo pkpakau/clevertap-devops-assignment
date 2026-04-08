@@ -45,3 +45,6 @@ node_groups = {
     }]
   }
 }
+
+github_org  = "pkpakau"
+github_repo = "clevertap-devops-assignment"

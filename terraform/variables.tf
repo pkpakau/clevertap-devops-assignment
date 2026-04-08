@@ -111,3 +111,16 @@ variable "allowed_cidr_blocks" {
   type        = list(string)
   default     = []
 }
+
+# ─────────────────────────────────────────
+# GitHub OIDC
+# ─────────────────────────────────────────
+variable "github_org" {
+  description = "GitHub organisation or username (e.g. pkpakau)"
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (e.g. clevertap-devops-assignment)"
+  type        = string
+}
