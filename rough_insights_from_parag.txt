@@ -1,0 +1,101 @@
+Hello anyone reading this, 
+I'm Parag K, this is written in accordance to my past experience in handling Infra, Cost Accounting, ISO 27001 Audits, etc.
+
+Thanks for reading!
+
+Lets Go!!!
+
+
+--------------------------------------------
+Section 1: Infrastructure Architecture & IaC
+--------------------------------------------
+
+Task 1a: Check GitHub Repo
+-------------------------
+
+Task 1b: State & Drift Management
+1. Mostly we create modules for components and import them in main.tf
+2. Create S3 bucket with bucket policy with only read permission and versioning enabled for versioned update or rollback
+3. Separate bucket for each accounts(dev, staging, prod)
+	dev-<dev_id>-bucket
+	dev/us-east-1/terraform.state and dev/ap-south-1/terraform.state
+	We can assign separate buckets to individual roles, dev and prod bucket access handled by different roles
+4. For teams accessing same statefiles you can enable DynamoDB locking
+5. For multi teams setup, create subfolders for owning teams.
+6. For drift detection, can write a cronjob with terraform plan in GitHub workflows and do slack alerts
+7. On Call Engineers own the system and decide on updating terraform, import if required or discarding drift
+8. [ Most Imp ] Enable CloudTrail for Post Incident RCA
+
+
+
+Task 1c: Design Question
+------------------------
+1. Create a separate EU account with cluster and managed by single argocd control plane
+2. No Transit Gateway or peering to US/APAC as blocked by Data residency EU Law no transit/rest in another region (bound to eu-west-1)
+3. Add IAM permission Boundary restricting only eu-west-1 region 
+4. For CI/CD Deployment, create separate GitHub environment with region specific configs
+5. Manage a central argocd in the control plane and creates ApplicationSet and other accounts with their deployments as argo targets as new application (think of hub and spoke)
+6. Advantages: all app are managed by single argocd with different helm values, consistent architecture
+7. Can Setup AWS Config Rules if any resource is present in another region, then mark the resource non complaint and alert them to team.
+8. Audit logs to same account
+
+
+-----------------------------------------------------------
+Section 3: Developer Platform, CI/CD & Engineering Velocity
+----------------------------------------------------------- 
+
+Task 3a: Check GitHub Repo
+--------------------------
+
+Task 3b: Design Question
+------------------------
+Internal Developer Platform (IDP) capability
+We can build a platform just like we had in Amazon Music. Lets say we need to build a 3 tier application that needs to be deployed.
+1. We had AWS CDK or CF template which is tied to their LDAP(Cost-Center/Team/Service/Owner) and financial owner.
+2. Once you fill out questions, it creates a git repo with sample react code, CDN, sub domain hosted zone with split horizon splitting, s3 static hosting with identity provider and CDK code with base stack, CI/CD, monitoring and observability.
+3. You can clear up the resources with a click as it deletes all the stacks.
+4. TTL tagging can be applied too like burner accounts used for training or short term testing.
+5. For Kubernetes env, mostly I'll prefer new account but if required to be added in same account, use separate namespace and network policy and apply IAM permission boundary.
+
+
+Section 4: Cost Engineering 
+
+Task 4a: 
+Based on my past experience and our workload I think 
+
+Week 1-2 - Quick Wins
+----------------------
+1. If we are not using IaC like terraform or CDK, lots of resources gets untracked especially Elastic IPs - delete this [ Low Effort | Medium Risk ]
+2. Check for any stale EBS volumes as this stays when we delete EC2s as it is not managed by IaC default behavior is to retain the EBS volumes [ Low Effort | High Risk ]
+3. Check Stale EC2s, I've noticed manually created EC2s mostly don't have tags attached ( flag for detecting such nodes )
+4. Check Cost Explorer for most expensive services and clearing up loose infras and chase stakeholders or teams to clear up resources or intimidation for future deletion of this resources
+
+
+Week 3-6
+--------
+1. Don't create separate NAT Gateways for each public subnet in non PROD or UAT envs ( NATs are expensive and for multi vpc environment it becomes major factor of costs 32$/NAT/month)
+[ Medium Effort | Medium Risk - requires discussions ] 
+2. S3 Tiering would be helpful in storing vpc flow logs which might be needed in ISO audits
+[ Medium Effort | Low Risk ]
+3. Re-architecture needed 
+	- Use spot instances in case of dev, testing envs
+	- on demand for fixed workloads
+	- Reserved instance to get maximum discounts for predictable workloads (upfront payment needed but pre-validation of workflow needed)
+[ Medium Effort | High Risk - effects workload stress tests ]
+
+
+Long Term
+----------
+1. Check DBs CPU and Memory Utilization of RDS or Postgres, Scale down if you can
+2. Move to Managed Postgres ( Aurora Postgres ) if auto scaling is operationally overhead (yes, it expensive but saves a lot of time and have configurable ACUs and can scale down to 0 too
+3. If we are accessing s3 bucket from private subnet resources, create VPC Endpoint Gateway as it has low latency, free same region data transfer rather than traditional public internet way
+4. Use AWS Graviton CPUs to get cheaper instances plus faster
+
+Mostly I see silent network costs and its most non obvious. Other issues can be flagged once I see the internal architecture.
+
+
+4B - FinOps Process Design
+1. Every resources should have tags (Env/Cost-Center/Team/Service) - Add Service Control Policies (SCP)
+2. Month 1-2 : Create tag based weekly report for teams 
+3. Month 2-3: Create Soft Chargeback (team cloud budget) and flag usage in engineering review meetings
+4. Month 4+: Can implement similar structure what we had in AWS, enforcing team bills (every team own their AWS costs), easier for delegation 
