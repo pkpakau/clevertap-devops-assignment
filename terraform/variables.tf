@@ -115,6 +115,12 @@ variable "allowed_cidr_blocks" {
 # ─────────────────────────────────────────
 # GitHub OIDC
 # ─────────────────────────────────────────
+variable "prometheus_retention_days" {
+  description = "Prometheus data retention in days"
+  type        = number
+  default     = 15
+}
+
 variable "github_org" {
   description = "GitHub organisation or username (e.g. pkpakau)"
   type        = string

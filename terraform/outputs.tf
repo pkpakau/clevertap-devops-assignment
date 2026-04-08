@@ -38,3 +38,18 @@ output "eks_oidc_provider_url" {
   description = "OIDC provider URL"
   value       = module.eks.oidc_provider_url
 }
+
+output "ecr_repository_url" {
+  description = "ECR repository URL for event-ingestion"
+  value       = aws_ecr_repository.event_ingestion.repository_url
+}
+
+output "event_ingestion_role_arn" {
+  description = "IRSA role ARN for event-ingestion pods"
+  value       = aws_iam_role.event_ingestion.arn
+}
+
+output "app_deploy_role_arn" {
+  description = "IAM role ARN for GitHub Actions app deployments"
+  value       = aws_iam_role.app_deploy.arn
+}

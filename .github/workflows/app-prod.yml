@@ -1,0 +1,95 @@
+name: App — Production Deploy (Canary)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: app-prod
+  cancel-in-progress: false   # never cancel a prod deploy mid-canary
+
+jobs:
+
+  deploy-prod:
+    name: Canary deploy → prod
+    runs-on: ubuntu-latest
+    environment: production   # 2 required reviewers
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.PROD_ACCOUNT_ID }}:role/app-deploy-role
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Promote image to prod ECR
+        # Pull the image already validated in staging — same SHA, no rebuild
+        run: |
+          STAGING_IMAGE="${{ vars.STAGING_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/event-ingestion:sha-${{ github.sha }}"
+          PROD_IMAGE="${{ steps.ecr-login.outputs.registry }}/event-ingestion:sha-${{ github.sha }}"
+
+          docker pull ${STAGING_IMAGE}
+          docker tag ${STAGING_IMAGE} ${PROD_IMAGE}
+          docker push ${PROD_IMAGE}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name clevertap-prod --region us-east-1
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Helm deploy — trigger Argo Rollouts canary
+        # Updating the image tag on the Rollout resource automatically
+        # starts the canary process: 10% → 5min → 50% → 10min → 100%
+        # Argo Rollouts controller manages traffic shifting and analysis
+        run: |
+          helm upgrade --install event-ingestion app/helm \
+            --namespace prod \
+            --create-namespace \
+            --values app/helm/values-prod.yaml \
+            --set image.repository=${{ steps.ecr-login.outputs.registry }}/event-ingestion \
+            --set image.tag=sha-${{ github.sha }} \
+            --wait \
+            --timeout 2m
+          # --wait returns after Rollout resource is updated
+          # Argo Rollouts then takes over the canary progression
+
+      - name: Monitor rollout
+        # Watch Argo Rollouts progress — fails if rollback triggered
+        run: |
+          kubectl argo rollouts status event-ingestion \
+            --namespace prod \
+            --timeout 30m
+        # Exit codes:
+        # 0 = rollout completed successfully (reached 100%)
+        # 1 = rollout was aborted/rolled back (analysis failed)
+
+      - name: Tag image as stable on success
+        if: success()
+        run: |
+          PROD_IMAGE="${{ steps.ecr-login.outputs.registry }}/event-ingestion"
+          # Also tag with the release version for audit trail
+          docker tag ${PROD_IMAGE}:sha-${{ github.sha }} ${PROD_IMAGE}:${{ github.ref_name }}
+          docker push ${PROD_IMAGE}:${{ github.ref_name }}
+          echo "Released ${{ github.ref_name }} successfully"
+
+      - name: Notify on rollback
+        if: failure()
+        run: |
+          echo "Canary rollback triggered — Prometheus analysis failed"
+          echo "Error rate or p99 latency exceeded threshold"
+          echo "Argo Rollouts automatically reverted to stable version"
+          # Slack notification would go here via webhook

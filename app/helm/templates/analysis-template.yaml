@@ -1,0 +1,43 @@
+{{- if .Values.canary.enabled }}
+# AnalysisTemplate — defines the Prometheus query used to auto-rollback
+# Argo Rollouts runs this at each canary pause step
+# If error rate exceeds 1% → rollback to stable automatically
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Release.Name }}-error-rate
+  namespace: {{ .Release.Namespace }}
+spec:
+  args:
+    - name: service
+
+  metrics:
+    - name: error-rate
+      # Run every 1 minute, must pass for 3 consecutive checks before proceeding
+      interval: 1m
+      count: 3
+      successCondition: result[0] < 0.01   # < 1% error rate = healthy
+      failureLimit: 1                        # 1 failure = immediate rollback
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{`{{args.service}}`}}",status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="{{`{{args.service}}`}}"}[5m]))
+
+    - name: p99-latency
+      interval: 1m
+      count: 3
+      # p99 latency must stay under 500ms
+      successCondition: result[0] < 0.5
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{service="{{`{{args.service}}`}}"}[5m]))
+              by (le)
+            )
+{{- end }}

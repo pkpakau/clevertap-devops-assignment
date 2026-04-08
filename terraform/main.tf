@@ -49,3 +49,28 @@ module "eks" {
   # Allow VPC CIDR to reach private API server endpoint
   allowed_cidr_blocks = concat([var.vpc_cidr], var.allowed_cidr_blocks)
 }
+
+# ─────────────────────────────────────────
+# EKS Add-ons
+# Installed after cluster is ready:
+#   ALB Controller, Cluster Autoscaler, Node Termination Handler,
+#   External Secrets Operator, Argo Rollouts, Prometheus+Grafana
+# ─────────────────────────────────────────
+module "eks_addons" {
+  source = "./modules/eks-addons"
+
+  cluster_name           = module.eks.cluster_name
+  cluster_endpoint       = module.eks.cluster_endpoint
+  cluster_ca_certificate = module.eks.cluster_ca_certificate
+  oidc_provider_arn      = module.eks.oidc_provider_arn
+  oidc_provider_url      = module.eks.oidc_provider_url
+
+  region         = var.region
+  environment    = var.environment
+  aws_account_id = var.aws_account_id
+  vpc_id         = module.vpc.vpc_id
+
+  prometheus_retention_days = var.prometheus_retention_days
+
+  depends_on = [module.eks]
+}

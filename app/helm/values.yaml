@@ -1,0 +1,70 @@
+# Base values — overridden per environment via values-{env}.yaml
+
+image:
+  repository: ""        # set via --set image.repository=ACCOUNT.dkr.ecr.REGION.amazonaws.com/event-ingestion
+  tag: "latest"         # overridden with commit SHA in CI
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: "alb"
+  host: ""              # set per environment
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# IRSA — pod uses this ServiceAccount which is annotated with IAM role ARN
+serviceAccount:
+  create: true
+  name: "event-ingestion-sa"
+  annotations: {}       # eks.amazonaws.com/role-arn set per environment
+
+# External Secrets Operator — syncs secrets from AWS Secrets Manager
+externalSecret:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreName: "aws-secrets-store"
+  secrets:
+    - secretKey: KAFKA_BROKERS
+      remoteKey: ""     # set per environment e.g. /clevertap/prod/kafka-brokers
+    - secretKey: DB_PASSWORD
+      remoteKey: ""     # set per environment
+
+env:
+  APP_ENV: "dev"
+  APP_VERSION: "1.0.0"
+  AWS_REGION: "us-east-1"
+
+# Spot node toleration — workloads that tolerate spot go here
+tolerations: []
+
+nodeSelector: {}
+
+# Pod disruption budget — always keep at least 1 pod running during disruptions
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Canary via Argo Rollouts — enabled in prod only
+# When true: Rollout resource is used instead of Deployment
+canary:
+  enabled: false

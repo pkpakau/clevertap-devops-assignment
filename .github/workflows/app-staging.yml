@@ -1,0 +1,103 @@
+name: App — Staging Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: app-staging
+  cancel-in-progress: false
+
+jobs:
+
+  deploy-staging:
+    name: Deploy → staging
+    runs-on: ubuntu-latest
+    environment: staging    # 1 required reviewer — configured in GitHub Environments
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.STAGING_ACCOUNT_ID }}:role/app-deploy-role
+          aws-region: us-east-1
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Promote image from dev ECR to staging ECR
+        # Build once in PR, promote the same image — never rebuild
+        run: |
+          DEV_IMAGE="${{ vars.DEV_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/event-ingestion:sha-${{ github.sha }}"
+          STAGING_IMAGE="${{ steps.ecr-login.outputs.registry }}/event-ingestion:sha-${{ github.sha }}"
+
+          # Pull from dev ECR (assumes cross-account ECR pull permission)
+          docker pull ${DEV_IMAGE}
+          docker tag ${DEV_IMAGE} ${STAGING_IMAGE}
+          docker push ${STAGING_IMAGE}
+
+          echo "STAGING_IMAGE=${STAGING_IMAGE}" >> $GITHUB_ENV
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name clevertap-staging --region us-east-1
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.14.0"
+
+      - name: Helm deploy to staging
+        run: |
+          helm upgrade --install event-ingestion app/helm \
+            --namespace staging \
+            --create-namespace \
+            --values app/helm/values-staging.yaml \
+            --set image.repository=${{ steps.ecr-login.outputs.registry }}/event-ingestion \
+            --set image.tag=sha-${{ github.sha }} \
+            --wait \
+            --timeout 10m
+
+      - name: Smoke tests
+        run: |
+          BASE_URL="http://event-ingestion.staging.clevertap.internal"
+
+          echo "Waiting for service to be ready..."
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "/health returned 200"
+              break
+            fi
+            echo "Attempt ${i}/12 — got ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+
+          if [ "$STATUS" != "200" ]; then
+            echo "Smoke test FAILED — /health did not return 200 after 2 minutes"
+            exit 1
+          fi
+
+          # Readiness check
+          READY=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/ready")
+          if [ "$READY" != "200" ]; then
+            echo "Smoke test FAILED — /ready returned ${READY}"
+            exit 1
+          fi
+
+          echo "All smoke tests passed"
+
+      - name: Rollback on smoke test failure
+        if: failure()
+        run: |
+          echo "Smoke tests failed — rolling back to previous release"
+          helm rollback event-ingestion --namespace staging

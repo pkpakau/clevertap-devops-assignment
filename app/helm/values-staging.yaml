@@ -1,0 +1,31 @@
+replicaCount: 2
+
+ingress:
+  host: "event-ingestion.staging.clevertap.internal"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 10
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::222222222222:role/event-ingestion-staging"
+
+externalSecret:
+  secrets:
+    - secretKey: KAFKA_BROKERS
+      remoteKey: "/clevertap/staging/kafka-brokers"
+    - secretKey: DB_PASSWORD
+      remoteKey: "/clevertap/staging/db-password"
+
+env:
+  APP_ENV: "staging"
+  AWS_REGION: "us-east-1"

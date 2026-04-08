@@ -1,0 +1,111 @@
+{{- if .Values.canary.enabled }}
+# Argo Rollouts — replaces standard Deployment in prod
+# Canary strategy: 10% → 5min pause → 50% → 10min pause → 100%
+# Auto rollback if Prometheus error rate > 1% at any step
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+        version: {{ .Values.image.tag | quote }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: {{ .Release.Name }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: {{ .Release.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          env:
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+
+          {{- if .Values.externalSecret.enabled }}
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-secrets
+          {{- end }}
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+
+  strategy:
+    canary:
+      # Canary service routes % traffic to new pods; stable routes rest
+      canaryService: {{ .Release.Name }}-canary
+      stableService: {{ .Release.Name }}-stable
+      trafficRouting:
+        alb:
+          ingress: {{ .Release.Name }}
+          servicePort: {{ .Values.service.port }}
+
+      steps:
+        - setWeight: 10
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: { duration: 10m }
+        - setWeight: 100
+
+      # Prometheus analysis runs at each pause — rolls back on breach
+      analysis:
+        templates:
+          - templateName: {{ .Release.Name }}-error-rate
+        startingStep: 1
+        args:
+          - name: service
+            value: {{ .Release.Name }}
+{{- end }}
