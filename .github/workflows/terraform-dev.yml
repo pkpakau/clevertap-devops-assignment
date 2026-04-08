@@ -1,0 +1,126 @@
+name: Terraform Deploy — Dev
+
+# Manually triggered from the Actions tab on any PR branch
+# Engineer runs this when they want to validate infra changes in dev
+# before merging to main
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "Region to deploy"
+        required: true
+        default: "us-east-1"
+        type: choice
+        options:
+          - us-east-1
+          - ap-south-1
+          - both
+
+permissions:
+  id-token: write
+  contents: read
+
+# Prevent concurrent applies to the same dev environment
+concurrency:
+  group: terraform-dev-${{ github.event.inputs.region }}
+  cancel-in-progress: false  # queue, never drop infra applies
+
+jobs:
+
+  # ─────────────────────────────────────────
+  # Deploy to a single region
+  # ─────────────────────────────────────────
+  deploy-single:
+    name: Apply — dev-${{ github.event.inputs.region }}
+    if: github.event.inputs.region != 'both'
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.DEV_ACCOUNT_ID }}:role/terraform-apply-role
+          aws-region: ${{ github.event.inputs.region }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tf-state-dev-${{ github.event.inputs.region }}" \
+            -backend-config="key=clevertap/terraform.tfstate" \
+            -backend-config="region=${{ github.event.inputs.region }}" \
+            -backend-config="dynamodb_table=tf-locks-dev" \
+            -input=false
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file="dev-${{ github.event.inputs.region }}.tfvars" \
+            -no-color \
+            -input=false
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply \
+            -var-file="dev-${{ github.event.inputs.region }}.tfvars" \
+            -auto-approve \
+            -input=false
+
+  # ─────────────────────────────────────────
+  # Deploy to both regions (matrix)
+  # ─────────────────────────────────────────
+  deploy-both:
+    name: Apply — dev-${{ matrix.region }}
+    if: github.event.inputs.region == 'both'
+    runs-on: ubuntu-latest
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [us-east-1, ap-south-1]
+
+    # us-east-1 must complete first — it creates the TGW that ap-south-1 attaches to
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.DEV_ACCOUNT_ID }}:role/terraform-apply-role
+          aws-region: ${{ matrix.region }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tf-state-dev-${{ matrix.region }}" \
+            -backend-config="key=clevertap/terraform.tfstate" \
+            -backend-config="region=${{ matrix.region }}" \
+            -backend-config="dynamodb_table=tf-locks-dev" \
+            -input=false
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply \
+            -var-file="dev-${{ matrix.region }}.tfvars" \
+            -auto-approve \
+            -input=false

@@ -1,0 +1,72 @@
+name: Terraform Deploy — Prod
+
+# Triggered on release tags: v*.*.* (e.g. v1.2.0)
+# Requires 2 reviewer approvals via GitHub Environment protection rules
+# Tag explicitly — never auto-deploy infra to prod on a branch merge
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "app/**"
+      - ".github/workflows/app-*.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-prod
+  cancel-in-progress: false  # never cancel a prod apply mid-run
+
+jobs:
+  deploy:
+    name: Apply — prod-${{ matrix.region }}
+    runs-on: ubuntu-latest
+    environment: production   # 2 required reviewers configured in GitHub → Settings → Environments
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [us-east-1, ap-south-1]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.PROD_ACCOUNT_ID }}:role/terraform-apply-role
+          aws-region: ${{ matrix.region }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tf-state-prod-${{ matrix.region }}" \
+            -backend-config="key=clevertap/terraform.tfstate" \
+            -backend-config="region=${{ matrix.region }}" \
+            -backend-config="dynamodb_table=tf-locks-prod" \
+            -input=false
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file="prod-${{ matrix.region }}.tfvars" \
+            -no-color \
+            -input=false
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply \
+            -var-file="prod-${{ matrix.region }}.tfvars" \
+            -auto-approve \
+            -input=false

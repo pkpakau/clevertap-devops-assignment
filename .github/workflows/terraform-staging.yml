@@ -1,0 +1,70 @@
+name: Terraform Deploy — Staging
+
+# Triggered automatically on merge to main
+# Requires 1 reviewer approval via GitHub Environment protection rules
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Apply — staging-${{ matrix.region }}
+    runs-on: ubuntu-latest
+    environment: staging   # 1 required reviewer configured in GitHub → Settings → Environments
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [us-east-1, ap-south-1]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.STAGING_ACCOUNT_ID }}:role/terraform-apply-role
+          aws-region: ${{ matrix.region }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tf-state-staging-${{ matrix.region }}" \
+            -backend-config="key=clevertap/terraform.tfstate" \
+            -backend-config="region=${{ matrix.region }}" \
+            -backend-config="dynamodb_table=tf-locks-staging" \
+            -input=false
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file="staging-${{ matrix.region }}.tfvars" \
+            -no-color \
+            -input=false
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply \
+            -var-file="staging-${{ matrix.region }}.tfvars" \
+            -auto-approve \
+            -input=false
