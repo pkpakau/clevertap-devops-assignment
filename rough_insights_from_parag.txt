@@ -12,8 +12,16 @@ Section 1: Infrastructure Architecture & IaC
 
 Task 1a: Check GitHub Repo
 -------------------------
+1. Create seperate modules for vpc and eks cluster
+2. cluster seperate buckets and DynamoDB table per account ( one time script )
+3. Give remote backend in GitHub Actions with --tfvars flag with seperate (region-env-state files)
+4. Completely modular and DRY principle with model structure
+
+<IMP> Claude Code memory md file added so that further development token uses less tokens
+
 
 Task 1b: State & Drift Management
+---------------------------------
 1. Mostly we create modules for components and import them in main.tf
 2. Create S3 bucket with bucket policy with only read permission and versioning enabled for versioned update or rollback
 3. Separate bucket for each accounts(dev, staging, prod)
@@ -27,7 +35,6 @@ Task 1b: State & Drift Management
 8. [ Most Imp ] Enable CloudTrail for Post Incident RCA
 
 
-
 Task 1c: Design Question
 ------------------------
 1. Create a separate EU account with cluster and managed by single argocd control plane
@@ -38,6 +45,27 @@ Task 1c: Design Question
 6. Advantages: all app are managed by single argocd with different helm values, consistent architecture
 7. Can Setup AWS Config Rules if any resource is present in another region, then mark the resource non complaint and alert them to team.
 8. Audit logs to same account
+
+---------------------------------------------------------
+Section 2: Reliability, observability & Incident Response
+---------------------------------------------------------
+
+Task 2a: Observability Stack Design
+-----------------------------------
+1. Metrics - We can use Prometheues with PromQL or Loki ( as it supports quering and has easy integration with grafana dashboards)
+2. Logs - Can use cloudwatch, Promtail or Elastic ( if compliance search is required )
+3. Traces - X ray or Open telemetry data can be sent to Logstash
+4. Events - k8 logs retention to Loki
+
+Flow would be like this
+collection(fluent Beat, Promethues, OpenTelemetry, k8s events) → aggregation(Logstash - filter and parse) → storage(Elastic Search storage and shards) → alerting ( Grafana dasbhoard, kibana alerts)
+
+SLO Based alerting
+Use maybe two window approach ( check avg for 5m and 1hr - if budget burning is high then alert someone)
+
+Alert Numbness is real, only check for real incidents various tools like sloth are availble to do the maths to identify real solutions
+
+Cardinality management - add preprocessing before adding label and montioring to treate slow queries
 
 
 -----------------------------------------------------------
