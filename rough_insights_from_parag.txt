@@ -67,6 +67,16 @@ Alert Numbness is real, only check for real incidents various tools like sloth a
 
 Cardinality management - add preprocessing before adding label and montioring to treate slow queries
 
+Task 2b: Check Code
+
+Task 2c: 
+1. Tune the threshold, sometime cpu Utilization is higher in deployments
+2. if lots of alerts for 5 mins but resolves in 10 mins make it 10 
+3. convert thresholds into SLO Burn rate (reduces alert volumes)
+4. tell me when its not working, make visual alerting rather than notifications
+5. MTTA improvment
+6. Weekly reviews
+
 
 -----------------------------------------------------------
 Section 3: Developer Platform, CI/CD & Engineering Velocity
